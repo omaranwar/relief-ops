@@ -1,6 +1,6 @@
 import TopBar from "./components/TopBar";
 import KpiCards from "./components/KpiCards";
-import MapPlaceholder from "./components/MapPlaceholder";
+import MapView from "./components/MapView";   // ✅ updated
 import ActionPlanCard from "./components/ActionPlanCard";
 import IncidentsTable from "./components/IncidentsTable";
 import SidebarFilters from "./components/SidebarFilters";
@@ -33,7 +33,7 @@ export default function App() {
             {/* Map + Action Plan row (equal heights, flush bottom) */}
             <div className="grid grid-cols-12 gap-4 items-stretch">
               <div className="col-span-12 xl:col-span-6">
-                <MapPlaceholder />
+                <MapView />   {/* ✅ swapped in real map */}
               </div>
               <div className="col-span-12 xl:col-span-6">
                 <ActionPlanCard />

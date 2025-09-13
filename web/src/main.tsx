@@ -1,10 +1,22 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App'
 import './index.css'
-import App from './App.tsx'
+import { setApiBase } from './lib/apiClient'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+;(async () => {
+  try {
+    const cfg = await (await fetch('/config.json')).json()
+    setApiBase(cfg.apiBaseUrl)
+    // Optional: console log to confirm
+    console.log('ReliefOps config loaded:', cfg)
+  } catch (e) {
+    console.error('Failed to load /config.json', e)
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  )
+})()
