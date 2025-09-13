@@ -51,7 +51,7 @@ export default function App() {
 
             <div className="grid grid-cols-12 gap-4 items-stretch">
               <div className="col-span-12 xl:col-span-6">
-                <MapView incidentId={selectedIncidentId} key={`map-${refreshKey}`} />
+                <MapView incidentId={selectedIncidentId} refreshKey={refreshKey} />
               </div>
               <div className="col-span-12 xl:col-span-6">
                 <ActionPlanCard incidentId={selectedIncidentId} />

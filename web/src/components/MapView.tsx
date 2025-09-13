@@ -8,6 +8,7 @@ type Incident = {
   region: string;
   type: string;
   priority: "P1" | "P2" | "P3" | string;
+  status?: string;
   lat?: number;
   lon?: number;
   etaSummary?: string;
@@ -38,20 +39,21 @@ function colorForPriority(p: Incident["priority"]) {
   return "#10b981";                 // emerald-500
 }
 
-export default function MapView({ incidentId }: { incidentId?: string | null }) {
+export default function MapView({ incidentId, refreshKey }: { incidentId?: string | null, refreshKey?: number }) {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [plan, setPlan] = useState<PlanGeo | null>(null);
 
-  // load incidents for markers
+  // load incidents for markers — runs on mount AND whenever refreshKey changes
   useEffect(() => {
     let alive = true;
     (async () => {
       const data = await get<Incident[]>("/v1/incidents");
       if (!alive) return;
       setIncidents(data);
+      // console.log("MapView: incidents fetched", data.map(d=>({id:d.id,status:d.status})));
     })();
     return () => { alive = false; };
-  }, []);
+  }, [refreshKey]);
 
   // load selected incident routes as polylines
   useEffect(() => {
@@ -63,10 +65,9 @@ export default function MapView({ incidentId }: { incidentId?: string | null }) 
       setPlan(data);
     })();
     return () => { alive = false; };
-  }, [incidentId]);
+  }, [incidentId, refreshKey]);
 
   const center = useMemo(() => {
-    // center on selected incident if present
     const sel = incidents.find(i => i.id === incidentId);
     return sel && typeof sel.lat === "number" && typeof sel.lon === "number"
       ? [sel.lat, sel.lon] as [number, number]
@@ -78,8 +79,9 @@ export default function MapView({ incidentId }: { incidentId?: string | null }) 
       <MapContainer center={center} zoom={7} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
         <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-        {/* Incident markers with color by priority */}
+        {/* Incident markers with color by priority; hide Closed */}
         {incidents
+          .filter(i => i.status !== "Closed")
           .filter(i => typeof i.lat === "number" && typeof i.lon === "number")
           .map((i) => (
             <CircleMarker
@@ -92,6 +94,7 @@ export default function MapView({ incidentId }: { incidentId?: string | null }) 
                 <div className="text-sm">
                   <div className="font-semibold">{i.type} — {i.priority}</div>
                   <div>{i.region}</div>
+                  <div>Status: {i.status ?? "—"}</div>
                   <div>ETA: {i.etaSummary ?? "—"}</div>
                   <div className="mt-1 text-xs text-slate-500">{i.id}</div>
                 </div>
@@ -106,7 +109,7 @@ export default function MapView({ incidentId }: { incidentId?: string | null }) 
             <Polyline
               key={`${plan.incidentId}-${r.vehicleId}`}
               positions={[[r.fromLat as number, r.fromLon as number],[r.toLat as number, r.toLon as number]]}
-              pathOptions={{ color: "#2563eb", weight: 4, opacity: 0.7 }} // blue-600
+              pathOptions={{ color: "#2563eb", weight: 4, opacity: 0.7 }}
             />
           ))
         }
