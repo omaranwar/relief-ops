@@ -1,77 +1,58 @@
-import { useEffect, useState } from "react";
-import TopBar from "./components/TopBar";
+import { useState } from "react";
+import { useIncidents } from "./features/incidents/useIncidents";
+import { usePlan } from "./features/planning/usePlan";
+
 import KpiCards from "./components/KpiCards";
+import IncidentsTable from "./components/IncidentsTable";
 import MapView from "./components/MapView";
 import ActionPlanCard from "./components/ActionPlanCard";
-import IncidentsTable from "./components/IncidentsTable";
 import SidebarFilters from "./components/SidebarFilters";
-import { useIncidents } from "./features/incidents/useIncidents";
 import NewIncidentModal from "./components/NewIncidentModal";
 
-export default function App() {
-  const { data: incidents } = useIncidents();
-  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [showNewModal, setShowNewModal] = useState(false);
+function App() {
+  const { data: incidents, loading, error } = useIncidents();
+  const [selectedIncident, setSelectedIncident] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!selectedIncidentId && incidents && incidents.length > 0) {
-      setSelectedIncidentId(incidents[0].id);
-    }
-  }, [incidents, selectedIncidentId]);
-
-  function handleCreated(newId: string) {
-    console.log("App: new incident created", newId);
-    setSelectedIncidentId(newId);
-    setRefreshKey(k => k + 1); // trigger list/map refetch
-  }
+  const { plan, regenerate } = usePlan(selectedIncident);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900">
-      <TopBar onNewIncident={() => { console.log("App: open NewIncidentModal"); setShowNewModal(true); }} />
+    <div className="flex h-screen bg-gray-100">
+      <SidebarFilters />
 
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
-        <div className="grid grid-cols-12 gap-4">
-          {/* Sidebar */}
-          <div className="col-span-12 md:col-span-4 lg:col-span-3">
-            <SidebarFilters />
+      <div className="flex-1 flex flex-col">
+        <header className="p-4 bg-white shadow">
+          <h1 className="text-2xl font-bold">ReliefOps Console</h1>
+        </header>
+
+        <main className="flex-1 p-4 overflow-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-3">
+            <KpiCards incidents={incidents || []} />
           </div>
 
-          {/* Main */}
-          <div className="col-span-12 md:col-span-8 lg:col-span-9 space-y-6">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">ReliefOps Console</h1>
-              <p className="text-slate-600 dark:text-slate-300 mt-2">Climate Disasters &amp; Emergency Response Dashboard</p>
-              {selectedIncidentId && (
-                <div className="mt-1 text-xs text-slate-500">Selected Incident: <span className="font-medium">{selectedIncidentId}</span></div>
-              )}
-            </div>
-
-            <KpiCards />
-
-            <div className="grid grid-cols-12 gap-4 items-stretch">
-              <div className="col-span-12 xl:col-span-6">
-                <MapView incidentId={selectedIncidentId} refreshKey={refreshKey} />
-              </div>
-              <div className="col-span-12 xl:col-span-6">
-                <ActionPlanCard incidentId={selectedIncidentId} />
-              </div>
-            </div>
-
-            <IncidentsTable onRunPlan={(id) => { setSelectedIncidentId(id); }} key={`table-${refreshKey}`} />
-
-            <footer className="text-xs text-slate-500 dark:text-slate-400 pt-4 border-t dark:border-slate-700">
-              ReliefOps v0.1 • Demo data • {new Date().toISOString().slice(0,10)}
-            </footer>
+          <div className="lg:col-span-2 bg-white rounded shadow p-4">
+            <MapView incidents={incidents || []} />
           </div>
-        </div>
+
+          <div className="bg-white rounded shadow p-4">
+            <ActionPlanCard
+              plan={plan}
+              loading={loading}
+              onRegenerate={regenerate}
+            />
+          </div>
+
+          <div className="lg:col-span-3 bg-white rounded shadow p-4">
+            <IncidentsTable
+              incidents={incidents || []}
+              onSelectIncident={setSelectedIncident}
+            />
+          </div>
+        </main>
       </div>
 
-      <NewIncidentModal
-        open={showNewModal}
-        onClose={() => { console.log("App: close NewIncidentModal"); setShowNewModal(false); }}
-        onCreated={handleCreated}
-      />
+      <NewIncidentModal />
     </div>
   );
 }
+
+export default App;

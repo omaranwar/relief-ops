@@ -4,19 +4,11 @@ import App from './App'
 import './index.css'
 import { setApiBase } from './lib/apiClient'
 
-;(async () => {
-  try {
-    const cfg = await (await fetch('/config.json')).json()
-    setApiBase(cfg.apiBaseUrl)
-    // Optional: console log to confirm
-    console.log('ReliefOps config loaded:', cfg)
-  } catch (e) {
-    console.error('Failed to load /config.json', e)
-  }
+// 👇 API base URL'i .env'den alıyoruz
+setApiBase(import.meta.env.VITE_API_BASE);
 
-  ReactDOM.createRoot(document.getElementById('root')!).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>,
-  )
-})()
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
