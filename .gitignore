@@ -1,5 +1,8 @@
-node_modules/
-.dist/
-.env*
 cdk.out/
+.terraform/
+*.tfstate
+*.tfstate.backup
+.env
+node_modules/
+dist/
 
