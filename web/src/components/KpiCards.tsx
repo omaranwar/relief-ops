@@ -8,72 +8,59 @@ type Summary = {
   avgEtaMinutes: number | null;
 };
 
-export default function KpiCards() {
+export default function KpiCards({ refreshKey = 0 }: { refreshKey?: number }) {
   const [data, setData] = useState<Summary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      // cache-bust to avoid any stale dev-server caching
+      const d = await get<Summary>(`/v1/summary?ts=${Date.now()}`);
+      setData(d);
+    } catch (e) {
+      console.error("Failed to load summary", e);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
-        const res = await get<Summary>("/v1/summary");
-        if (alive) {
-          setData(res);
-          setErr(null);
-        }
-      } catch (e: any) {
-        if (alive) setErr(e?.message ?? "Failed to load summary");
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-    return () => { alive = false };
-  }, []);
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
-  const fmt = (n: number | null | undefined) =>
-    n == null ? "—" : n.toLocaleString();
+  const s = data;
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-      {/* Incidents */}
-      <div className="rounded-xl shadow p-4 border bg-red-50 border-red-200">
-        <div className="text-xs text-red-700">Incidents (Active)</div>
-        <div className="text-2xl font-semibold mt-1 text-red-800">
-          {loading ? "…" : fmt(data?.incidentsActive)}
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/40 rounded-2xl p-5">
+        <div className="text-red-700 dark:text-red-300 text-sm font-medium">Incidents (Active)</div>
+        <div className="text-3xl font-semibold text-red-800 dark:text-red-200 mt-2">
+          {loading || !s ? "—" : s.incidentsActive}
         </div>
       </div>
 
-      {/* People Affected */}
-      <div className="rounded-xl shadow p-4 border bg-amber-50 border-amber-200">
-        <div className="text-xs text-amber-700">People Affected (est)</div>
-        <div className="text-2xl font-semibold mt-1 text-amber-800">
-          {loading ? "…" : fmt(data?.peopleAffected)}
+      <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-5">
+        <div className="text-amber-700 dark:text-amber-300 text-sm font-medium">People Affected (est)</div>
+        <div className="text-3xl font-semibold text-amber-800 dark:text-amber-200 mt-2">
+          {loading || !s ? "—" : s.peopleAffected.toLocaleString()}
         </div>
       </div>
 
-      {/* Units Available */}
-      <div className="rounded-xl shadow p-4 border bg-green-50 border-green-200">
-        <div className="text-xs text-green-700">Units Available</div>
-        <div className="text-2xl font-semibold mt-1 text-green-800">
-          {loading ? "…" : fmt(data?.unitsAvailable)}
+      <div className="bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-900/40 rounded-2xl p-5">
+        <div className="text-emerald-700 dark:text-emerald-300 text-sm font-medium">Units Available</div>
+        <div className="text-3xl font-semibold text-emerald-800 dark:text-emerald-200 mt-2">
+          {loading || !s ? "—" : s.unitsAvailable}
         </div>
       </div>
 
-      {/* Avg ETA */}
-      <div className="rounded-xl shadow p-4 border bg-blue-50 border-blue-200">
-        <div className="text-xs text-blue-700">Avg ETA</div>
-        <div className="text-2xl font-semibold mt-1 text-blue-800">
-          {loading ? "…" : data?.avgEtaMinutes == null ? "—" : `${data.avgEtaMinutes}m`}
+      <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-900/40 rounded-2xl p-5">
+        <div className="text-indigo-700 dark:text-indigo-300 text-sm font-medium">Avg ETA</div>
+        <div className="text-3xl font-semibold text-indigo-800 dark:text-indigo-200 mt-2">
+          {loading || !s ? "—" : (s.avgEtaMinutes == null ? "—" : `${s.avgEtaMinutes}m`)}
         </div>
       </div>
-
-      {err && (
-        <div className="col-span-2 md:col-span-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">
-          {err}
-        </div>
-      )}
     </div>
   );
 }

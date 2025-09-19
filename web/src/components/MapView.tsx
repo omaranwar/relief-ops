@@ -75,7 +75,7 @@ export default function MapView({ incidentId, refreshKey }: { incidentId?: strin
   }, [incidents, incidentId]);
 
   return (
-    <div className="w-full h-96 rounded-2xl overflow-hidden border border-slate-300">
+    <div className="w-full h-full rounded-2xl overflow-hidden border border-slate-300 h-full">
       <MapContainer center={center} zoom={7} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
         <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
