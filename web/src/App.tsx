@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "./components/TopBar";
 import KpiCards from "./components/KpiCards";
 import MapView from "./components/MapView";
 import ActionPlanCard from "./components/ActionPlanCard";
 import IncidentsTable from "./components/IncidentsTable";
 import LogisticsPanel from "./components/LogisticsPanel";
-import NewIncidentModal from "./components/NewIncidentModal"; // <-- import modal
-import { get } from "./lib/apiClient";
+import NewIncidentModal from "./components/NewIncidentModal";
+import { get, postSmart } from "./lib/apiClient";
 
 type Incident = {
   id: string;
@@ -19,71 +19,173 @@ type Incident = {
   lon?: number;
 };
 
+const API_BASE =
+  (window as any).__RELIEFOPS_API_BASE__ ||
+  (import.meta as any).env?.VITE_API_BASE ||
+  "";
+
 export default function App() {
-  const [refreshKey, setRefreshKey] = useState(0);
+  // Separate keys so incidents can auto-refresh without nuking the plan
+  const [incidentsKey, setIncidentsKey] = useState(0);
+  const [planKey, setPlanKey] = useState(0);
+
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [plan, setPlan] = useState<any | null>(null);
-  const [showNewModal, setShowNewModal] = useState(false); // <-- track modal
+  const [incidentsLoading, setIncidentsLoading] = useState(false);
+  const [incidentsError, setIncidentsError] = useState<string | null>(null);
 
-  // Load incidents list
-  useEffect(() => {
-    (async () => {
-      try {
-        const all = await get<Incident[]>("/v1/incidents");
-        setIncidents(all);
-        if (!selectedIncidentId && all.length) setSelectedIncidentId(all[0].id);
-      } catch (e) {
-        console.error("Failed to load incidents", e);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  const [plan, setPlan] = useState<string | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
 
-  // Load plan for the selected incident (cache-busted)
-  useEffect(() => {
-    if (!selectedIncidentId) {
-      setPlan(null);
-      return;
-    }
-    (async () => {
-      try {
-        const p = await get<any>(`/v1/plan/${selectedIncidentId}?ts=${Date.now()}`);
-        setPlan(p);
-      } catch (e) {
-        console.error("Failed to load plan", e);
-        setPlan(null);
-      }
-    })();
-  }, [selectedIncidentId, refreshKey]);
+  const [showNewModal, setShowNewModal] = useState(false);
+
+  // Gentle auto-refresh for incidents ONLY
+  const autoRefreshMs = 15_000;
+  const intervalRef = useRef<number | null>(null);
 
   const selectedIncident = useMemo(
     () => incidents.find((i) => i.id === selectedIncidentId) || null,
     [incidents, selectedIncidentId]
   );
 
+  const refreshIncidents = useCallback(async () => {
+    setIncidentsLoading(true);
+    setIncidentsError(null);
+    try {
+      const all = await get<Incident[]>("/v1/incidents");
+      setIncidents(all);
+      if (!selectedIncidentId && all.length) {
+        setSelectedIncidentId(all[0].id);
+      } else if (selectedIncidentId && !all.some((i) => i.id === selectedIncidentId)) {
+        setSelectedIncidentId(all[0]?.id ?? null);
+      }
+    } catch (e: any) {
+      console.error("Failed to load incidents", e);
+      setIncidentsError(e?.message ?? "Failed to load incidents");
+    } finally {
+      setIncidentsLoading(false);
+    }
+  }, [selectedIncidentId]);
+
+  // SMART GET for plan (supports JSON or text/plain)
+  const refreshPlan = useCallback(async (incidentId: string) => {
+    setPlanLoading(true);
+    setPlanError(null);
+    try {
+      const resp = await fetch(
+        `${API_BASE}/v1/plan/${encodeURIComponent(incidentId)}?ts=${Date.now()}`,
+        { headers: { Accept: "application/json, text/plain" } }
+      );
+      if (!resp.ok) throw new Error(await resp.text());
+      const ct = resp.headers.get("content-type") || "";
+      const data = ct.includes("application/json") ? await resp.json() : await resp.text();
+      const text =
+        typeof data === "string"
+          ? data
+          : typeof (data as any)?.plan === "string"
+          ? (data as any).plan
+          : typeof (data as any)?.action_plan === "string"
+          ? (data as any).action_plan
+          : JSON.stringify(data, null, 2);
+      setPlan(text);
+    } catch (e: any) {
+      console.error("Failed to load plan", e);
+      setPlan(null);
+      setPlanError(e?.message ?? "Failed to load plan");
+    } finally {
+      setPlanLoading(false);
+    }
+  }, []);
+
+  // Generate via POST /v1/actionPlan and immediately display
+  const generatePlan = useCallback(async () => {
+    if (!selectedIncidentId) return;
+    try {
+      setPlanLoading(true);
+      setPlanError(null);
+      const resp: any = await postSmart("/v1/actionPlan", { incidentId: selectedIncidentId });
+      const planText =
+        resp?.plan ??
+        resp?.action_plan ??
+        (typeof resp === "string" ? resp : JSON.stringify(resp, null, 2));
+      setPlan(planText);
+    } catch (e: any) {
+      console.error(e);
+      setPlanError(e?.message ?? "Failed to generate plan");
+    } finally {
+      setPlanLoading(false);
+      setTimeout(() => {
+        document.getElementById("action-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    }
+  }, [selectedIncidentId]);
+
+  // -------- effects --------
+  useEffect(() => {
+    refreshIncidents();
+  }, [incidentsKey, refreshIncidents]);
+
+  useEffect(() => {
+    if (!selectedIncidentId) {
+      setPlan(null);
+      setPlanError(null);
+      return;
+    }
+    refreshPlan(selectedIncidentId);
+  }, [selectedIncidentId, planKey, refreshPlan]);
+
+  // Auto-refresh incidents ONLY (no plan reload here)
+  useEffect(() => {
+    const start = () => {
+      if (intervalRef.current) return;
+      intervalRef.current = window.setInterval(() => {
+        setIncidentsKey((k) => k + 1);
+      }, autoRefreshMs);
+    };
+    const stop = () => {
+      if (!intervalRef.current) return;
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    };
+    const onVis = () => (document.visibilityState === "visible" ? start() : stop());
+    document.addEventListener("visibilitychange", onVis);
+    if (document.visibilityState === "visible") start();
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      stop();
+    };
+  }, []);
+
+  // Keyboard incidents refresh (R)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "r" && (e.metaKey || e.ctrlKey)) return;
+      if (e.key.toLowerCase() === "r") setIncidentsKey((k) => k + 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900">
-      {/* Top bar triggers modal */}
       <TopBar onNewIncident={() => setShowNewModal(true)} />
 
-      {/* New Incident Modal */}
       <NewIncidentModal
         open={showNewModal}
         onClose={() => setShowNewModal(false)}
         onCreated={(id) => {
           setSelectedIncidentId(id);
-          setRefreshKey((k) => k + 1);
+          setIncidentsKey((k) => k + 1);
           setShowNewModal(false);
           setTimeout(() => {
-            document
-              .getElementById("action-plan")
-              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            document.getElementById("action-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
           }, 0);
         }}
       />
 
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
+      <div className="max-w-7xl mx-auto p-6 space-y-8">
+        {/* Header + KPIs */}
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">ReliefOps Console</h1>
           <p className="text-slate-600 dark:text-slate-300 mt-2">
@@ -96,56 +198,117 @@ export default function App() {
           )}
         </div>
 
-        <KpiCards refreshKey={refreshKey} />
+        <KpiCards refreshKey={incidentsKey} />
 
-        <div className="grid grid-cols-12 gap-4 items-stretch">
+        {/* ROW 1: Map (left) + Action Plan (right) */}
+        <div className="grid grid-cols-12 gap-6 items-start">
+          {/* MAP PANEL — fixed height so Leaflet can measure container */}
           <div className="col-span-12 xl:col-span-6">
-            <MapView
-              key={`map-${selectedIncidentId}-${refreshKey}`}
-              incidentId={selectedIncidentId}
-              refreshKey={refreshKey}
-            />
+            <div className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-2 h-[420px] xl:h-[520px]">
+              {incidentsLoading && <div className="p-4 text-sm text-slate-500">Loading incidents…</div>}
+              {incidentsError && <div className="p-4 text-sm text-red-600">Error: {incidentsError}</div>}
+              {/* Ensure MapView fills the parent */}
+              <div className="w-full h-full">
+                <MapView
+                  key={`map-${selectedIncidentId ?? "none"}-${incidentsKey}`}
+                  incidentId={selectedIncidentId}
+                  refreshKey={incidentsKey}
+                />
+              </div>
+            </div>
           </div>
+
+          {/* ACTION PLAN PANEL — scrollable interior */}
           <div className="col-span-12 xl:col-span-6">
-            <div id="action-plan">
+            <div
+              id="action-plan"
+              className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-2 min-h-[420px] xl:min-h-[520px] max-h-[75vh] flex flex-col"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Action Plan</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={!selectedIncidentId || planLoading}
+                    onClick={generatePlan}
+                    className="rounded-md border px-2 py-1 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
+                    title="Generate plan via Bedrock"
+                  >
+                    {planLoading ? "Generating…" : "Generate / Refresh Plan"}
+                  </button>
+                  <button
+                    disabled={!selectedIncidentId || planLoading}
+                    onClick={() => setPlanKey((k) => k + 1)}
+                    className="rounded-md border px-2 py-1 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
+                    title="Reload stored plan"
+                  >
+                    Reload Stored Plan
+                  </button>
+                </div>
+              </div>
+
+              {planLoading && <div className="p-4 text-sm text-slate-500">Loading action plan…</div>}
+              {planError && (
+                <div className="p-4 text-sm text-amber-600">No plan yet or failed to load: {planError}</div>
+              )}
+
               <ActionPlanCard incidentId={selectedIncidentId} plan={plan} />
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-12 gap-4">
+        {/* ROW 2: Logistics */}
+        <div className="grid grid-cols-12 gap-6 mt-2">
           <div className="col-span-12">
-            <LogisticsPanel
-              incident={selectedIncident}
-              onReserved={() => setRefreshKey((k) => k + 1)}
-            />
+            <div className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-2">
+              <LogisticsPanel incident={selectedIncident} onReserved={() => setIncidentsKey((k) => k + 1)} />
+            </div>
           </div>
         </div>
 
-        <IncidentsTable
-          onView={(id) => {
-            setSelectedIncidentId(id);
-            setTimeout(() => {
-              document
-                .getElementById("action-plan")
-                ?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 0);
-          }}
-          onRunPlan={(id) => {
-            setSelectedIncidentId(id);
-            setRefreshKey((k) => k + 1);
-            setTimeout(() => {
-              document
-                .getElementById("action-plan")
-                ?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 0);
-          }}
-          onChanged={() => setRefreshKey((k) => k + 1)}
-          key={`table-${refreshKey}`}
-        />
+        {/* ROW 3: Incidents table */}
+        <div className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-2 mt-2">
+          <IncidentsTable
+            onView={(id) => {
+              setSelectedIncidentId(id);
+              setPlanKey((k) => k + 1);
+              setTimeout(() => {
+                document.getElementById("action-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }, 0);
+            }}
+            onRunPlan={async (id) => {
+              setSelectedIncidentId(id);
+              try {
+                setPlanLoading(true);
+                setPlanError(null);
+                const resp: any = await postSmart("/v1/actionPlan", { incidentId: id });
+                const planText =
+                  resp?.plan ??
+                  resp?.action_plan ??
+                  (typeof resp === "string" ? resp : JSON.stringify(resp, null, 2));
+                setPlan(planText);
+              } catch (e: any) {
+                setPlanError(e?.message ?? "Failed to generate plan");
+              } finally {
+                setPlanLoading(false);
+                setTimeout(() => {
+                  document.getElementById("action-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }, 0);
+              }
+            }}
+            onChanged={() => setIncidentsKey((k) => k + 1)}
+            key={`table-${incidentsKey}`}
+          />
+        </div>
 
         <footer className="text-xs text-slate-500 dark:text-slate-400 pt-4 border-t dark:border-slate-700">
           ReliefOps v0.1 • Demo data • {new Date().toISOString().slice(0, 10)}
+          <button
+            onClick={() => setIncidentsKey((k) => k + 1)}
+            className="ml-3 inline-flex items-center rounded-md border px-2 py-1 text-xs hover:bg-slate-50 dark:hover:bg-slate-700"
+            title="Refresh incidents (R)"
+          >
+            Refresh Incidents
+          </button>
         </footer>
       </div>
     </div>

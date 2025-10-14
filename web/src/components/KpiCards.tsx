@@ -1,65 +1,155 @@
 import { useEffect, useState } from "react";
 import { get } from "../lib/apiClient";
 
+type Props = { refreshKey?: number };
+
 type Summary = {
-  incidentsActive: number;
+  activeIncidents: number;
   peopleAffected: number;
-  unitsAvailable: number;
-  avgEtaMinutes: number | null;
+  unitsAvailable?: number;
+  avgEtaMinutes?: number; // number of minutes for an average ETA
 };
 
-export default function KpiCards({ refreshKey = 0 }: { refreshKey?: number }) {
+function KPICard({
+  title,
+  value,
+  accent,
+  subtitle,
+}: {
+  title: string;
+  value: string | number;
+  accent: "rose" | "amber" | "teal" | "indigo";
+  subtitle?: string;
+}) {
+  const styles: Record<typeof accent, string> = {
+    rose:
+      "bg-rose-900/10 border-rose-900/25 text-rose-100 shadow-[inset_0_0_0_1px_rgba(244,63,94,.18)]",
+    amber:
+      "bg-amber-900/10 border-amber-900/25 text-amber-100 shadow-[inset_0_0_0_1px_rgba(245,158,11,.18)]",
+    teal:
+      "bg-teal-900/10 border-teal-900/25 text-teal-100 shadow-[inset_0_0_0_1px_rgba(13,148,136,.18)]",
+    indigo:
+      "bg-indigo-900/10 border-indigo-900/25 text-indigo-100 shadow-[inset_0_0_0_1px_rgba(99,102,241,.18)]",
+  };
+
+  return (
+    <div className={`rounded-3xl p-6 border ${styles[accent]} backdrop-blur`}>
+      <div className="text-base font-semibold opacity-90">{title}</div>
+      <div className="mt-4 text-4xl font-extrabold tracking-tight">{value}</div>
+      {subtitle ? (
+        <div className="mt-2 text-xs opacity-75">{subtitle}</div>
+      ) : null}
+    </div>
+  );
+}
+
+export default function KpiCards({ refreshKey }: Props) {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function load() {
-    setLoading(true);
-    try {
-      // cache-bust to avoid any stale dev-server caching
-      const d = await get<Summary>(`/v1/summary?ts=${Date.now()}`);
-      setData(d);
-    } catch (e) {
-      console.error("Failed to load summary", e);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+
+      // 1) Prefer the /v1/summary endpoint if you have it.
+      try {
+        const s = await get<Summary>("/v1/summary");
+        if (!cancelled) {
+          console.info("[KPI] Using /v1/summary:", s);
+          setData(s);
+          setLoading(false);
+        }
+        return;
+      } catch (e) {
+        console.warn("[KPI] /v1/summary failed; falling back to /v1/incidents", e);
+      }
+
+      // 2) Fallback: derive KPIs from /v1/incidents
+      try {
+        const inc = await get<
+          Array<{ status?: string; peopleAffected?: number; etaMinutes?: number }>
+        >("/v1/incidents");
+
+        const activeIncidents = inc.filter(
+          (i) => (i.status || "").toLowerCase() !== "closed"
+        ).length;
+
+        const peopleAffected = inc.reduce(
+          (sum, i) => sum + (Number(i.peopleAffected) || 0),
+          0
+        );
+
+        // If your items contain an etaMinutes field, compute an average; otherwise leave undefined.
+        const etas = inc.map((i) => Number(i.etaMinutes)).filter((n) => Number.isFinite(n));
+        const avgEtaMinutes =
+          etas.length > 0 ? Math.round(etas.reduce((a, b) => a + b, 0) / etas.length) : undefined;
+
+        const derived: Summary = {
+          activeIncidents,
+          peopleAffected,
+          unitsAvailable: undefined,
+          avgEtaMinutes,
+        };
+        if (!cancelled) {
+          console.info("[KPI] Derived from /v1/incidents:", derived);
+          setData(derived);
+          setLoading(false);
+        }
+      } catch (e) {
+        console.error("[KPI] Fallback /v1/incidents failed", e);
+        if (!cancelled) {
+          setData(null);
+          setLoading(false);
+        }
+      }
+    }
+
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+    };
   }, [refreshKey]);
 
-  const s = data;
+  const dash = "—";
+  const active = data?.activeIncidents ?? dash;
+  const ppl = data?.peopleAffected ?? dash;
+  const units = data?.unitsAvailable ?? dash;
+  const eta =
+    typeof data?.avgEtaMinutes === "number" ? `${data?.avgEtaMinutes} min` : dash;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <div className="bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/40 rounded-2xl p-5">
-        <div className="text-red-700 dark:text-red-300 text-sm font-medium">Incidents (Active)</div>
-        <div className="text-3xl font-semibold text-red-800 dark:text-red-200 mt-2">
-          {loading || !s ? "—" : s.incidentsActive}
-        </div>
+    <div className="grid grid-cols-12 gap-6">
+      <div className="col-span-12 md:col-span-6 xl:col-span-3">
+        <KPICard
+          title="Incidents (Active)"
+          value={loading ? "…" : active}
+          accent="rose"
+        />
       </div>
-
-      <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-5">
-        <div className="text-amber-700 dark:text-amber-300 text-sm font-medium">People Affected (est)</div>
-        <div className="text-3xl font-semibold text-amber-800 dark:text-amber-200 mt-2">
-          {loading || !s ? "—" : s.peopleAffected.toLocaleString()}
-        </div>
+      <div className="col-span-12 md:col-span-6 xl:col-span-3">
+        <KPICard
+          title="People Affected (est)"
+          value={loading ? "…" : ppl}
+          accent="amber"
+        />
       </div>
-
-      <div className="bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-900/40 rounded-2xl p-5">
-        <div className="text-emerald-700 dark:text-emerald-300 text-sm font-medium">Units Available</div>
-        <div className="text-3xl font-semibold text-emerald-800 dark:text-emerald-200 mt-2">
-          {loading || !s ? "—" : s.unitsAvailable}
-        </div>
+      <div className="col-span-12 md:col-span-6 xl:col-span-3">
+        <KPICard
+          title="Units Available"
+          value={loading ? "…" : units}
+          accent="teal"
+          subtitle={!loading && units === "—" ? "Implement /v1/summary to populate" : undefined}
+        />
       </div>
-
-      <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-900/40 rounded-2xl p-5">
-        <div className="text-indigo-700 dark:text-indigo-300 text-sm font-medium">Avg ETA</div>
-        <div className="text-3xl font-semibold text-indigo-800 dark:text-indigo-200 mt-2">
-          {loading || !s ? "—" : (s.avgEtaMinutes == null ? "—" : `${s.avgEtaMinutes}m`)}
-        </div>
+      <div className="col-span-12 md:col-span-6 xl:col-span-3">
+        <KPICard
+          title="Avg ETA"
+          value={loading ? "…" : eta}
+          accent="indigo"
+          subtitle={!loading && eta === "—" ? "Derive from incident ETAs or summary" : undefined}
+        />
       </div>
     </div>
   );
