@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { get } from "../lib/apiClient";
 
-type Props = { refreshKey?: number };
+type Props = {
+  refreshKey?: number;
+  selectedIncidentId?: string; // <-- pass from App
+};
 
 type Summary = {
   activeIncidents: number;
   peopleAffected: number;
   unitsAvailable?: number;
-  avgEtaMinutes?: number; // number of minutes for an average ETA
+  avgEtaMinutes?: number;
 };
 
 function KPICard({
@@ -31,19 +34,16 @@ function KPICard({
     indigo:
       "bg-indigo-900/10 border-indigo-900/25 text-indigo-100 shadow-[inset_0_0_0_1px_rgba(99,102,241,.18)]",
   };
-
   return (
     <div className={`rounded-3xl p-6 border ${styles[accent]} backdrop-blur`}>
       <div className="text-base font-semibold opacity-90">{title}</div>
       <div className="mt-4 text-4xl font-extrabold tracking-tight">{value}</div>
-      {subtitle ? (
-        <div className="mt-2 text-xs opacity-75">{subtitle}</div>
-      ) : null}
+      {subtitle ? <div className="mt-2 text-xs opacity-75">{subtitle}</div> : null}
     </div>
   );
 }
 
-export default function KpiCards({ refreshKey }: Props) {
+export default function KpiCards({ refreshKey, selectedIncidentId }: Props) {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -53,24 +53,27 @@ export default function KpiCards({ refreshKey }: Props) {
     async function load() {
       setLoading(true);
 
-      // 1) Prefer the /v1/summary endpoint if you have it.
+      // 1) Try /v1/summary?incidentId=...
       try {
-        const s = await get<Summary>("/v1/summary");
+        const path = selectedIncidentId
+          ? `/v1/summary?incidentId=${encodeURIComponent(selectedIncidentId)}&ts=${Date.now()}`
+          : `/v1/summary?ts=${Date.now()}`; // guard against caching
+        const s = await get<Summary>(path);
         if (!cancelled) {
-          console.info("[KPI] Using /v1/summary:", s);
           setData(s);
           setLoading(false);
         }
         return;
       } catch (e) {
+        // continue to fallback
         console.warn("[KPI] /v1/summary failed; falling back to /v1/incidents", e);
       }
 
-      // 2) Fallback: derive KPIs from /v1/incidents
+      // 2) Fallback: derive from /v1/incidents
       try {
         const inc = await get<
           Array<{ status?: string; peopleAffected?: number; etaMinutes?: number }>
-        >("/v1/incidents");
+        >(`/v1/incidents?ts=${Date.now()}`);
 
         const activeIncidents = inc.filter(
           (i) => (i.status || "").toLowerCase() !== "closed"
@@ -81,7 +84,6 @@ export default function KpiCards({ refreshKey }: Props) {
           0
         );
 
-        // If your items contain an etaMinutes field, compute an average; otherwise leave undefined.
         const etas = inc.map((i) => Number(i.etaMinutes)).filter((n) => Number.isFinite(n));
         const avgEtaMinutes =
           etas.length > 0 ? Math.round(etas.reduce((a, b) => a + b, 0) / etas.length) : undefined;
@@ -89,11 +91,10 @@ export default function KpiCards({ refreshKey }: Props) {
         const derived: Summary = {
           activeIncidents,
           peopleAffected,
-          unitsAvailable: undefined,
+          unitsAvailable: undefined, // unknown in fallback
           avgEtaMinutes,
         };
         if (!cancelled) {
-          console.info("[KPI] Derived from /v1/incidents:", derived);
           setData(derived);
           setLoading(false);
         }
@@ -110,7 +111,7 @@ export default function KpiCards({ refreshKey }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshKey, selectedIncidentId]);
 
   const dash = "—";
   const active = data?.activeIncidents ?? dash;
@@ -122,25 +123,17 @@ export default function KpiCards({ refreshKey }: Props) {
   return (
     <div className="grid grid-cols-12 gap-6">
       <div className="col-span-12 md:col-span-6 xl:col-span-3">
-        <KPICard
-          title="Incidents (Active)"
-          value={loading ? "…" : active}
-          accent="rose"
-        />
+        <KPICard title="Incidents (Active)" value={loading ? "…" : active} accent="rose" />
       </div>
       <div className="col-span-12 md:col-span-6 xl:col-span-3">
-        <KPICard
-          title="People Affected (est)"
-          value={loading ? "…" : ppl}
-          accent="amber"
-        />
+        <KPICard title="People Affected (est)" value={loading ? "…" : ppl} accent="amber" />
       </div>
       <div className="col-span-12 md:col-span-6 xl:col-span-3">
         <KPICard
           title="Units Available"
           value={loading ? "…" : units}
           accent="teal"
-          subtitle={!loading && units === "—" ? "Implement /v1/summary to populate" : undefined}
+          subtitle={!loading && units === "—" ? "Comes from /v1/summary" : undefined}
         />
       </div>
       <div className="col-span-12 md:col-span-6 xl:col-span-3">
@@ -148,7 +141,7 @@ export default function KpiCards({ refreshKey }: Props) {
           title="Avg ETA"
           value={loading ? "…" : eta}
           accent="indigo"
-          subtitle={!loading && eta === "—" ? "Derive from incident ETAs or summary" : undefined}
+          subtitle={!loading && eta === "—" ? "Compute from ETAs or summary" : undefined}
         />
       </div>
     </div>

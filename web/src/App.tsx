@@ -37,6 +37,7 @@ export default function App() {
   const [plan, setPlan] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [planStatus, setPlanStatus] = useState<string | null>(null); // small status line
 
   const [showNewModal, setShowNewModal] = useState(false);
 
@@ -68,10 +69,11 @@ export default function App() {
     }
   }, [selectedIncidentId]);
 
-  // SMART GET for plan (supports JSON or text/plain)
-  const refreshPlan = useCallback(async (incidentId: string) => {
+  // Fetch stored plan (GET)
+  const fetchStoredPlan = useCallback(async (incidentId: string) => {
     setPlanLoading(true);
     setPlanError(null);
+    setPlanStatus("Loading stored plan…");
     try {
       const resp = await fetch(
         `${API_BASE}/v1/plan/${encodeURIComponent(incidentId)}?ts=${Date.now()}`,
@@ -88,11 +90,13 @@ export default function App() {
           : typeof (data as any)?.action_plan === "string"
           ? (data as any).action_plan
           : JSON.stringify(data, null, 2);
-      setPlan(text);
+      setPlan(text || null);
+      setPlanStatus("Stored plan loaded.");
     } catch (e: any) {
       console.error("Failed to load plan", e);
       setPlan(null);
       setPlanError(e?.message ?? "Failed to load plan");
+      setPlanStatus("Failed to fetch stored plan.");
     } finally {
       setPlanLoading(false);
     }
@@ -104,15 +108,18 @@ export default function App() {
     try {
       setPlanLoading(true);
       setPlanError(null);
+      setPlanStatus("Generating plan…");
       const resp: any = await postSmart("/v1/actionPlan", { incidentId: selectedIncidentId });
       const planText =
         resp?.plan ??
         resp?.action_plan ??
         (typeof resp === "string" ? resp : JSON.stringify(resp, null, 2));
-      setPlan(planText);
+      setPlan(planText || null);
+      setPlanStatus("Plan generated.");
     } catch (e: any) {
       console.error(e);
       setPlanError(e?.message ?? "Failed to generate plan");
+      setPlanStatus("Failed to generate plan.");
     } finally {
       setPlanLoading(false);
       setTimeout(() => {
@@ -130,10 +137,12 @@ export default function App() {
     if (!selectedIncidentId) {
       setPlan(null);
       setPlanError(null);
+      setPlanStatus(null);
       return;
     }
-    refreshPlan(selectedIncidentId);
-  }, [selectedIncidentId, planKey, refreshPlan]);
+    // on select, try stored plan first
+    fetchStoredPlan(selectedIncidentId);
+  }, [selectedIncidentId, planKey, fetchStoredPlan]);
 
   // Auto-refresh incidents ONLY (no plan reload here)
   useEffect(() => {
@@ -207,7 +216,6 @@ export default function App() {
             <div className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-2 h-[420px] xl:h-[520px]">
               {incidentsLoading && <div className="p-4 text-sm text-slate-500">Loading incidents…</div>}
               {incidentsError && <div className="p-4 text-sm text-red-600">Error: {incidentsError}</div>}
-              {/* Ensure MapView fills the parent */}
               <div className="w-full h-full">
                 <MapView
                   key={`map-${selectedIncidentId ?? "none"}-${incidentsKey}`}
@@ -222,23 +230,25 @@ export default function App() {
           <div className="col-span-12 xl:col-span-6">
             <div
               id="action-plan"
-              className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-2 min-h-[420px] xl:min-h-[520px] max-h-[75vh] flex flex-col"
+              className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-3 min-h-[420px] xl:min-h-[520px] max-h-[75vh] flex flex-col"
             >
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Action Plan</h2>
+                <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-100">Action Plan</h2>
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     disabled={!selectedIncidentId || planLoading}
                     onClick={generatePlan}
-                    className="rounded-md border px-2 py-1 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
+                    className="rounded-md border border-slate-300 dark:border-slate-400 bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-50 px-3 py-1.5 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50"
                     title="Generate plan via Bedrock"
                   >
                     {planLoading ? "Generating…" : "Generate / Refresh Plan"}
                   </button>
                   <button
+                    type="button"
                     disabled={!selectedIncidentId || planLoading}
-                    onClick={() => setPlanKey((k) => k + 1)}
-                    className="rounded-md border px-2 py-1 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
+                    onClick={() => selectedIncidentId && fetchStoredPlan(selectedIncidentId)}
+                    className="rounded-md border border-slate-300 dark:border-slate-400 bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-50 px-3 py-1.5 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50"
                     title="Reload stored plan"
                   >
                     Reload Stored Plan
@@ -246,9 +256,17 @@ export default function App() {
                 </div>
               </div>
 
-              {planLoading && <div className="p-4 text-sm text-slate-500">Loading action plan…</div>}
-              {planError && (
-                <div className="p-4 text-sm text-amber-600">No plan yet or failed to load: {planError}</div>
+              {/* tiny status line */}
+              {(planLoading || planError || planStatus) && (
+                <div className="px-1 pb-1 text-xs">
+                  {planLoading && <span className="text-slate-500">Loading…</span>}
+                  {!planLoading && planError && (
+                    <span className="text-amber-500">No plan yet or failed to load: {planError}</span>
+                  )}
+                  {!planLoading && !planError && planStatus && (
+                    <span className="text-slate-400">{planStatus}</span>
+                  )}
+                </div>
               )}
 
               <ActionPlanCard incidentId={selectedIncidentId} plan={plan} />
@@ -280,14 +298,17 @@ export default function App() {
               try {
                 setPlanLoading(true);
                 setPlanError(null);
+                setPlanStatus("Generating plan…");
                 const resp: any = await postSmart("/v1/actionPlan", { incidentId: id });
                 const planText =
                   resp?.plan ??
                   resp?.action_plan ??
                   (typeof resp === "string" ? resp : JSON.stringify(resp, null, 2));
-                setPlan(planText);
+                setPlan(planText || null);
+                setPlanStatus("Plan generated.");
               } catch (e: any) {
                 setPlanError(e?.message ?? "Failed to generate plan");
+                setPlanStatus("Failed to generate plan.");
               } finally {
                 setPlanLoading(false);
                 setTimeout(() => {
@@ -304,7 +325,7 @@ export default function App() {
           ReliefOps v0.1 • Demo data • {new Date().toISOString().slice(0, 10)}
           <button
             onClick={() => setIncidentsKey((k) => k + 1)}
-            className="ml-3 inline-flex items-center rounded-md border px-2 py-1 text-xs hover:bg-slate-50 dark:hover:bg-slate-700"
+            className="ml-3 inline-flex items-center rounded-md border border-slate-300 dark:border-slate-500 bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-50 px-2 py-1 text-xs hover:bg-slate-200 dark:hover:bg-slate-600"
             title="Refresh incidents (R)"
           >
             Refresh Incidents
