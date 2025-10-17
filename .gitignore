@@ -1,8 +1,23 @@
-cdk.out/
-.terraform/
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+dist/
+build/
+
+# Terraform
 *.tfstate
 *.tfstate.backup
-.env
-node_modules/
-dist/
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+crash.log
 
+# Env files
+.env
+.env.local
+.env.*.local
+
+# IDE / OS files
+.vscode/
+.DS_Store
