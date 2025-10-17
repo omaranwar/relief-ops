@@ -11,15 +11,15 @@ resource "aws_cloudfront_distribution" "web_app_cloudfront_distribution" {
     }
   }
 
-  enabled = true
+  enabled         = true
   is_ipv6_enabled = true
 
   default_root_object = "index.html"
 
   default_cache_behavior {
-    allowed_methods = ["GET", "HEAD"]
-    cached_methods  = ["GET", "HEAD"]
-    target_origin_id = "S3Origin"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "S3Origin"
     viewer_protocol_policy = "redirect-to-https"
     forwarded_values {
       query_string = false
@@ -30,16 +30,16 @@ resource "aws_cloudfront_distribution" "web_app_cloudfront_distribution" {
   }
 
   custom_error_response {
-    error_code         = 403
-    response_page_path = "/index.html"
-    response_code      = 200
+    error_code            = 403
+    response_page_path    = "/index.html"
+    response_code         = 200
     error_caching_min_ttl = 300
   }
 
   custom_error_response {
-    error_code         = 404
-    response_page_path = "/index.html"
-    response_code      = 200
+    error_code            = 404
+    response_page_path    = "/index.html"
+    response_code         = 200
     error_caching_min_ttl = 300
   }
 
