@@ -5,6 +5,14 @@ import App from "./App";
 import "./index.css";
 import { setApiBase } from "./lib/apiClient";
 
+
+setApiBase(import.meta.env.VITE_API_BASE);
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
 async function bootstrap() {
   // 1) Prefer env var from .env.local
   const envBase = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "");
