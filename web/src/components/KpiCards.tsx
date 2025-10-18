@@ -1,16 +1,20 @@
+// KpiCards.tsx uses selectedIncidentId to call /v1/summary?incidentId=...
+// <KpiCards selectedIncidentId={selectedIncidentId} refreshKey={refreshKey} />
+
+// src/components/KpiCards.tsx
 import { useEffect, useState } from "react";
 import { get } from "../lib/apiClient";
 
 type Props = {
   refreshKey?: number;
-  selectedIncidentId?: string; // <-- pass from App
+  selectedIncidentId?: string; // pass from App (currently selected incident)
 };
 
 type Summary = {
   activeIncidents: number;
   peopleAffected: number;
-  unitsAvailable?: number;
-  avgEtaMinutes?: number;
+  unitsAvailable?: number | null;
+  avgEtaMinutes?: number | null;
 };
 
 function KPICard({
@@ -24,7 +28,7 @@ function KPICard({
   accent: "rose" | "amber" | "teal" | "indigo";
   subtitle?: string;
 }) {
-  const styles: Record<typeof accent, string> = {
+  const styles: Record<"rose" | "amber" | "teal" | "indigo", string> = {
     rose:
       "bg-rose-900/10 border-rose-900/25 text-rose-100 shadow-[inset_0_0_0_1px_rgba(244,63,94,.18)]",
     amber:
@@ -47,17 +51,24 @@ export default function KpiCards({ refreshKey, selectedIncidentId }: Props) {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // simple number formatter for big numbers
+  const fmt = (n: unknown) =>
+    typeof n === "number" ? n.toLocaleString() : "—";
+
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       setLoading(true);
 
-      // 1) Try /v1/summary?incidentId=...
+      // Prefer the summary endpoint (includes unitsAvailable when incidentId is given)
       try {
         const path = selectedIncidentId
-          ? `/v1/summary?incidentId=${encodeURIComponent(selectedIncidentId)}&ts=${Date.now()}`
-          : `/v1/summary?ts=${Date.now()}`; // guard against caching
+          ? `/v1/summary?incidentId=${encodeURIComponent(
+              selectedIncidentId
+            )}&ts=${Date.now()}`
+          : `/v1/summary?ts=${Date.now()}`; // cache buster
+
         const s = await get<Summary>(path);
         if (!cancelled) {
           setData(s);
@@ -65,33 +76,37 @@ export default function KpiCards({ refreshKey, selectedIncidentId }: Props) {
         }
         return;
       } catch (e) {
-        // continue to fallback
         console.warn("[KPI] /v1/summary failed; falling back to /v1/incidents", e);
       }
 
-      // 2) Fallback: derive from /v1/incidents
+      // Fallback: derive from the incidents list (unitsAvailable unknown here)
       try {
         const inc = await get<
           Array<{ status?: string; peopleAffected?: number; etaMinutes?: number }>
         >(`/v1/incidents?ts=${Date.now()}`);
 
-        const activeIncidents = inc.filter(
+        const open = inc.filter(
           (i) => (i.status || "").toLowerCase() !== "closed"
-        ).length;
+        );
 
-        const peopleAffected = inc.reduce(
+        const activeIncidents = open.length;
+
+        const peopleAffected = open.reduce(
           (sum, i) => sum + (Number(i.peopleAffected) || 0),
           0
         );
 
-        const etas = inc.map((i) => Number(i.etaMinutes)).filter((n) => Number.isFinite(n));
+        const etas = open
+          .map((i) => Number(i.etaMinutes))
+          .filter((n) => Number.isFinite(n));
+
         const avgEtaMinutes =
-          etas.length > 0 ? Math.round(etas.reduce((a, b) => a + b, 0) / etas.length) : undefined;
+          etas.length > 0 ? Math.round(etas.reduce((a, b) => a + b, 0) / etas.length) : null;
 
         const derived: Summary = {
           activeIncidents,
           peopleAffected,
-          unitsAvailable: undefined, // unknown in fallback
+          unitsAvailable: null, // unknown in fallback
           avgEtaMinutes,
         };
         if (!cancelled) {
@@ -114,34 +129,45 @@ export default function KpiCards({ refreshKey, selectedIncidentId }: Props) {
   }, [refreshKey, selectedIncidentId]);
 
   const dash = "—";
-  const active = data?.activeIncidents ?? dash;
-  const ppl = data?.peopleAffected ?? dash;
-  const units = data?.unitsAvailable ?? dash;
-  const eta =
-    typeof data?.avgEtaMinutes === "number" ? `${data?.avgEtaMinutes} min` : dash;
+  const active = loading ? "…" : fmt(data?.activeIncidents ?? null);
+  const ppl = loading ? "…" : fmt(data?.peopleAffected ?? null);
+
+  const unitsVal =
+    loading ? "…" : data?.unitsAvailable == null ? dash : fmt(data.unitsAvailable);
+
+  const etaVal =
+    loading
+      ? "…"
+      : typeof data?.avgEtaMinutes === "number"
+      ? `${data.avgEtaMinutes} min`
+      : dash;
 
   return (
     <div className="grid grid-cols-12 gap-6">
       <div className="col-span-12 md:col-span-6 xl:col-span-3">
-        <KPICard title="Incidents (Active)" value={loading ? "…" : active} accent="rose" />
+        <KPICard title="Incidents (Active)" value={active} accent="rose" />
       </div>
       <div className="col-span-12 md:col-span-6 xl:col-span-3">
-        <KPICard title="People Affected (est)" value={loading ? "…" : ppl} accent="amber" />
+        <KPICard title="People Affected (est)" value={ppl} accent="amber" />
       </div>
       <div className="col-span-12 md:col-span-6 xl:col-span-3">
         <KPICard
           title="Units Available"
-          value={loading ? "…" : units}
+          value={unitsVal}
           accent="teal"
-          subtitle={!loading && units === "—" ? "Comes from /v1/summary" : undefined}
+          subtitle={
+            !loading && unitsVal === "—"
+              ? "Shown when an incident is selected"
+              : undefined
+          }
         />
       </div>
       <div className="col-span-12 md:col-span-6 xl:col-span-3">
         <KPICard
           title="Avg ETA"
-          value={loading ? "…" : eta}
+          value={etaVal}
           accent="indigo"
-          subtitle={!loading && eta === "—" ? "Compute from ETAs or summary" : undefined}
+          subtitle={!loading && etaVal === "—" ? "From ETAs or /v1/summary" : undefined}
         />
       </div>
     </div>

@@ -25,7 +25,7 @@ const API_BASE =
   "";
 
 export default function App() {
-  // Separate keys so incidents can auto-refresh without nuking the plan
+  // separate keys so incidents can refresh without nuking the plan
   const [incidentsKey, setIncidentsKey] = useState(0);
   const [planKey, setPlanKey] = useState(0);
 
@@ -37,11 +37,11 @@ export default function App() {
   const [plan, setPlan] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
-  const [planStatus, setPlanStatus] = useState<string | null>(null); // small status line
+  const [planStatus, setPlanStatus] = useState<string | null>(null);
 
   const [showNewModal, setShowNewModal] = useState(false);
 
-  // Gentle auto-refresh for incidents ONLY
+  // gentle auto refresh for incidents ONLY
   const autoRefreshMs = 15_000;
   const intervalRef = useRef<number | null>(null);
 
@@ -56,6 +56,8 @@ export default function App() {
     try {
       const all = await get<Incident[]>("/v1/incidents");
       setIncidents(all);
+
+      // ensure we always have a valid selection
       if (!selectedIncidentId && all.length) {
         setSelectedIncidentId(all[0].id);
       } else if (selectedIncidentId && !all.some((i) => i.id === selectedIncidentId)) {
@@ -69,7 +71,7 @@ export default function App() {
     }
   }, [selectedIncidentId]);
 
-  // Fetch stored plan (GET)
+  // fetch stored plan (GET /v1/plan/{id})
   const fetchStoredPlan = useCallback(async (incidentId: string) => {
     setPlanLoading(true);
     setPlanError(null);
@@ -102,7 +104,7 @@ export default function App() {
     }
   }, []);
 
-  // Generate via POST /v1/actionPlan and immediately display
+  // generate via POST /v1/actionPlan and display
   const generatePlan = useCallback(async () => {
     if (!selectedIncidentId) return;
     try {
@@ -123,7 +125,9 @@ export default function App() {
     } finally {
       setPlanLoading(false);
       setTimeout(() => {
-        document.getElementById("action-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        document
+          .getElementById("action-plan")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 0);
     }
   }, [selectedIncidentId]);
@@ -144,7 +148,7 @@ export default function App() {
     fetchStoredPlan(selectedIncidentId);
   }, [selectedIncidentId, planKey, fetchStoredPlan]);
 
-  // Auto-refresh incidents ONLY (no plan reload here)
+  // auto-refresh incidents ONLY
   useEffect(() => {
     const start = () => {
       if (intervalRef.current) return;
@@ -157,7 +161,8 @@ export default function App() {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     };
-    const onVis = () => (document.visibilityState === "visible" ? start() : stop());
+    const onVis = () =>
+      document.visibilityState === "visible" ? start() : stop();
     document.addEventListener("visibilitychange", onVis);
     if (document.visibilityState === "visible") start();
     return () => {
@@ -166,7 +171,7 @@ export default function App() {
     };
   }, []);
 
-  // Keyboard incidents refresh (R)
+  // keyboard refresh (R)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "r" && (e.metaKey || e.ctrlKey)) return;
@@ -188,7 +193,9 @@ export default function App() {
           setIncidentsKey((k) => k + 1);
           setShowNewModal(false);
           setTimeout(() => {
-            document.getElementById("action-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            document
+              .getElementById("action-plan")
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
           }, 0);
         }}
       />
@@ -196,26 +203,37 @@ export default function App() {
       <div className="max-w-7xl mx-auto p-6 space-y-8">
         {/* Header + KPIs */}
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">ReliefOps Console</h1>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+            ReliefOps Console
+          </h1>
           <p className="text-slate-600 dark:text-slate-300 mt-2">
             Climate Disasters &amp; Emergency Response Dashboard
           </p>
           {selectedIncidentId && (
             <p className="text-xs text-slate-500 mt-1">
-              Selected Incident: <span className="font-medium">{selectedIncidentId}</span>
+              Selected Incident:{" "}
+              <span className="font-medium">{selectedIncidentId}</span>
             </p>
           )}
         </div>
 
-        <KpiCards refreshKey={incidentsKey} />
+        {/* >>> KPIs now receive selectedIncidentId so Units Available appears <<< */}
+        <KpiCards
+          selectedIncidentId={selectedIncidentId ?? undefined}
+          refreshKey={incidentsKey}
+        />
 
         {/* ROW 1: Map (left) + Action Plan (right) */}
         <div className="grid grid-cols-12 gap-6 items-start">
           {/* MAP PANEL — fixed height so Leaflet can measure container */}
           <div className="col-span-12 xl:col-span-6">
             <div className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-2 h-[420px] xl:h-[520px]">
-              {incidentsLoading && <div className="p-4 text-sm text-slate-500">Loading incidents…</div>}
-              {incidentsError && <div className="p-4 text-sm text-red-600">Error: {incidentsError}</div>}
+              {incidentsLoading && (
+                <div className="p-4 text-sm text-slate-500">Loading incidents…</div>
+              )}
+              {incidentsError && (
+                <div className="p-4 text-sm text-red-600">Error: {incidentsError}</div>
+              )}
               <div className="w-full h-full">
                 <MapView
                   key={`map-${selectedIncidentId ?? "none"}-${incidentsKey}`}
@@ -233,7 +251,9 @@ export default function App() {
               className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-3 min-h-[420px] xl:min-h-[520px] max-h-[75vh] flex flex-col"
             >
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-100">Action Plan</h2>
+                <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-100">
+                  Action Plan
+                </h2>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -261,7 +281,9 @@ export default function App() {
                 <div className="px-1 pb-1 text-xs">
                   {planLoading && <span className="text-slate-500">Loading…</span>}
                   {!planLoading && planError && (
-                    <span className="text-amber-500">No plan yet or failed to load: {planError}</span>
+                    <span className="text-amber-500">
+                      No plan yet or failed to load: {planError}
+                    </span>
                   )}
                   {!planLoading && !planError && planStatus && (
                     <span className="text-slate-400">{planStatus}</span>
@@ -278,7 +300,10 @@ export default function App() {
         <div className="grid grid-cols-12 gap-6 mt-2">
           <div className="col-span-12">
             <div className="rounded-2xl bg-white/70 dark:bg-slate-800/60 backdrop-blur p-2">
-              <LogisticsPanel incident={selectedIncident} onReserved={() => setIncidentsKey((k) => k + 1)} />
+              <LogisticsPanel
+                incident={selectedIncident}
+                onReserved={() => setIncidentsKey((k) => k + 1)}
+              />
             </div>
           </div>
         </div>
@@ -290,7 +315,9 @@ export default function App() {
               setSelectedIncidentId(id);
               setPlanKey((k) => k + 1);
               setTimeout(() => {
-                document.getElementById("action-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                document
+                  .getElementById("action-plan")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
               }, 0);
             }}
             onRunPlan={async (id) => {
@@ -312,7 +339,9 @@ export default function App() {
               } finally {
                 setPlanLoading(false);
                 setTimeout(() => {
-                  document.getElementById("action-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  document
+                    .getElementById("action-plan")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
                 }, 0);
               }
             }}
