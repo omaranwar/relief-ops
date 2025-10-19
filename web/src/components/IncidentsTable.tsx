@@ -85,10 +85,17 @@ export default function IncidentsTable({ onView, onRunPlan, onChanged }: Props) 
   }, [load]);
 
   const filtered = rows.filter((r) => {
-    if (!q) return true;
-    const s = q.toLowerCase();
-    return r.id.toLowerCase().includes(s) || r.region.toLowerCase().includes(s);
-  });
+  if (!q) return true;
+  const s = q.toLowerCase();
+  return (
+    r.id?.toLowerCase().includes(s) ||
+    r.region?.toLowerCase().includes(s) ||
+    r.type?.toLowerCase().includes(s) ||
+    r.status?.toLowerCase().includes(s) ||
+    r.priority?.toLowerCase().includes(s)
+  );
+});
+
 
   /** Generate/refresh plan for a specific incident */
   async function runPlanFor(id: string) {

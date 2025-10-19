@@ -5,10 +5,6 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-<<<<<<< Updated upstream
-=======
-    "lint": "eslint .",
->>>>>>> Stashed changes
     "preview": "vite preview"
   },
   "dependencies": {
