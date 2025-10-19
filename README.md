@@ -41,7 +41,7 @@ Before starting, ensure the following tools and permissions are available:
 Before deploying the infrastructure, edit the `terraform/variables.tf` file and set a unique name for the S3 bucket used by the frontend app.
 
 ```hcl
-variable "s3_bucket_name" {
+variable "static_web_app_bucket_name" {
   default = "your-unique-app-bucket-name"
 }
 ```
