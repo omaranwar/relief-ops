@@ -1,0 +1,417 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS CloudFormation template for the ReliefOps AI hackathon infrastructure.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: A base name for the project resources.
+    Default: "reliefops"
+  S3BucketName:
+    Type: String
+    Description: The name of the S3 bucket for the static React app. Must be globally unique.
+    Default: "app.reliefops.ai"
+  BedrockSchemaBucketName:
+    Type: String
+    Description: The name of the S3 bucket for the Bedrock API schemas. Must be globally unique.
+    Default: "reliefops-bedrock-schemas"
+  CognitoUserPoolName:
+    Type: String
+    Description: The name of the Cognito User Pool.
+    Default: "reliefops-userpool"
+  LambdaCodePlaceholder:
+    Type: String
+    Default: 'exports.handler = async (event) => { console.log("code to be updated"); return { statusCode: 200, body: JSON.stringify("Hello from Lambda!") }; };'
+
+Resources:
+  # Frontend Resources
+  StaticWebAppBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+    DeletionPolicy: Retain
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketName
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Join ["", ["arn:aws:s3:::", !Ref S3BucketName, "/*"]]
+
+  WebAppCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !GetAtt StaticWebAppBucket.RegionalDomainName
+            Id: S3Origin
+            S3OriginConfig:
+              OriginAccessIdentity: !GetAtt OriginAccessIdentity.S3CanonicalUserId
+        Enabled: "true"
+        DefaultRootObject: index.html
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 300
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCachingMinTTL: 300
+            ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: "redirect-to-https"
+          ForwardedValues:
+            QueryString: "false"
+            Cookies:
+              Forward: "none"
+        PriceClass: PriceClass_100
+        HttpVersion: http2
+
+  OriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub "OAI for ${ProjectName} web app"
+
+  # API Layer Resources
+  APIGateway:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${ProjectName}-Api"
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+        AllowHeaders:
+          - "*"
+        AllowOrigins:
+          - "*"
+
+  # Lambda Functions
+  GetActionPlanFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-getActionPlan"
+      Runtime: nodejs22.x
+      Handler: index.handler
+      MemorySize: 256
+      Timeout: 30
+      Code:
+        ZipFile: !Ref LambdaCodePlaceholder
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  CreateIncidentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-createIncident"
+      Runtime: nodejs22.x
+      Handler: index.handler
+      MemorySize: 256
+      Timeout: 30
+      Code:
+        ZipFile: !Ref LambdaCodePlaceholder
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  ListIncidentsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-listIncidents"
+      Runtime: nodejs22.x
+      Handler: index.handler
+      MemorySize: 256
+      Timeout: 30
+      Code:
+        ZipFile: !Ref LambdaCodePlaceholder
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  # API Gateway Integrations and Routes
+  GetActionPlanIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref APIGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GetActionPlanFunction.Arn
+      PayloadFormatVersion: "2.0"
+      ConnectionType: "INTERNET"
+      IntegrationMethod: "POST"
+
+  CreateIncidentIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref APIGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CreateIncidentFunction.Arn
+      PayloadFormatVersion: "2.0"
+      ConnectionType: "INTERNET"
+      IntegrationMethod: "POST"
+
+  ListIncidentsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref APIGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ListIncidentsFunction.Arn
+      PayloadFormatVersion: "2.0"
+      ConnectionType: "INTERNET"
+      IntegrationMethod: "GET"
+
+  GetActionPlanRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref APIGateway
+      RouteKey: "POST /v1/actionPlan"
+      Target: !Join ["/", ["integrations", !Ref GetActionPlanIntegration]]
+
+  CreateIncidentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref APIGateway
+      RouteKey: "POST /v1/incident"
+      Target: !Join ["/", ["integrations", !Ref CreateIncidentIntegration]]
+
+  ListIncidentsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref APIGateway
+      RouteKey: "GET /v1/incidents"
+      Target: !Join ["/", ["integrations", !Ref ListIncidentsIntegration]]
+
+  APIGatewayStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref APIGateway
+      StageName: "$default"
+      AutoDeploy: true
+
+  LambdaAPIGatewayPermissionGetActionPlan:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt GetActionPlanFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGateway}/*/*"
+
+  LambdaAPIGatewayPermissionCreateIncident:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt CreateIncidentFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGateway}/*/*"
+
+  LambdaAPIGatewayPermissionListIncidents:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt ListIncidentsFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGateway}/*/*"
+
+  # Data Layer Resources
+  IncidentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-Incidents"
+      AttributeDefinitions:
+        - AttributeName: incidentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: incidentId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  PlansTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-PlansAndAllocations"
+      AttributeDefinitions:
+        - AttributeName: planId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: planId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  SitrepsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-sitrep-reports"
+
+  BedrockSchemaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BedrockSchemaBucketName
+
+  # AI and Integrations Resources (Placeholders)
+  BedrockAIModel:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub "${ProjectName}-AI-Agent"
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      FoundationModel: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+      Description: "An agent to generate action plans for incidents."
+      Instruction: "You are a helpful assistant that generates action plans for relief operations. Your goal is to use the provided tools to gather information and create a comprehensive plan."
+      IdleSessionTTLInSeconds: 3600
+      ActionGroups:
+        - ActionGroupName: "IncidentTools"
+          ActionGroupExecutor:
+            Lambda: !GetAtt GetActionPlanFunction.Arn
+          APISchema:
+            S3:
+              BucketName: !Ref BedrockSchemaBucket
+              ObjectKey: "incident-api-schema.json"
+        - ActionGroupName: "WeatherTools"
+          Description: "Tools to fetch weather data."
+        - ActionGroupName: "DepotTools"
+          Description: "Tools to manage and fetch depot information."
+
+  EventBridgeScheduler:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Name: !Sub "${ProjectName}-Scheduler"
+
+  SageMakerPlaceholder:
+    Type: AWS::SageMaker::NotebookInstance
+    Properties:
+      InstanceType: ml.t2.medium
+      NotebookInstanceName: !Sub "${ProjectName}-ForecastModel-Placeholder"
+      RoleArn: !GetAtt SageMakerRole.Arn
+
+  # IAM Roles
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt IncidentsTable.Arn
+                  - !GetAtt PlansTable.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Join ["", ["arn:aws:s3:::", !Ref SitrepsBucket, "/*"]]
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:Retrieve
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sagemaker:InvokeEndpoint
+                Resource: "*"
+
+  BedrockAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - bedrock.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: BedrockAgentPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt GetActionPlanFunction.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Join ["", [!GetAtt BedrockSchemaBucket.Arn, "/*"]]
+
+  SageMakerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - sagemaker.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: SageMakerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt SitrepsBucket.Arn
+                  - !Join ["", [!GetAtt SitrepsBucket.Arn, "/*"]]
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+
+Outputs:
+  WebsiteURL:
+    Description: The URL of the CloudFront distribution.
+    Value: !GetAtt WebAppCloudFrontDistribution.DomainName
+  APIGatewayURL:
+    Description: The URL of the API Gateway HTTP API.
+    Value: !Sub "https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com"
+  StaticS3BucketName:
+    Description: The name of the S3 bucket for the web app.
+    Value: !Ref StaticWebAppBucket
+  BedrockSchemaBucketName:
+    Description: The name of the S3 bucket for Bedrock API schemas.
+    Value: !Ref BedrockSchemaBucket
